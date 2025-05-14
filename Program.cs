@@ -1,6 +1,4 @@
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Azure.Functions.Worker;
 
 namespace PastIA.Function
 {
@@ -10,11 +8,12 @@ namespace PastIA.Function
         {
             var host = new HostBuilder()
                 .ConfigureFunctionsWorkerDefaults()
-                .ConfigureServices(services =>
-                {
-                    services.AddApplicationInsightsTelemetryWorkerService();
-                    services.ConfigureFunctionsApplicationInsights();
-                })
+                // Elimina o comenta estas líneas que causan el error
+                // .ConfigureServices(services =>
+                // {
+                //    services.AddApplicationInsightsTelemetryWorkerService();
+                //    services.ConfigureFunctionsApplicationInsights();
+                // })
                 .Build();
 
             host.Run();
