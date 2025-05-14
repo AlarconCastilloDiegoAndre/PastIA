@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.DependencyInjection;
 
-namespace PastIA.Function
+namespace PastIA.Function  // o el namespace que estés usando
 {
     public class Program
     {
@@ -8,11 +9,11 @@ namespace PastIA.Function
         {
             var host = new HostBuilder()
                 .ConfigureFunctionsWorkerDefaults()
-                // Elimina o comenta estas líneas que causan el error
+                // Quita estas líneas o comenta el bloque completo
                 // .ConfigureServices(services =>
                 // {
-                //    services.AddApplicationInsightsTelemetryWorkerService();
-                //    services.ConfigureFunctionsApplicationInsights();
+                //     services.AddApplicationInsightsTelemetryWorkerService();
+                //     services.ConfigureFunctionsApplicationInsights();
                 // })
                 .Build();
 
