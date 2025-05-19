@@ -1,5 +1,6 @@
+// AddMedication.cs actualizado
 using System;
-using Microsoft.Data.SqlClient; // Cambiado de System.Data.SqlClient
+using Microsoft.Data.SqlClient;
 using System.IO;
 using System.Net;
 using System.Text.Json;
@@ -23,7 +24,7 @@ namespace PastIA.Function
         public async Task<HttpResponseData> Run(
             [HttpTrigger(AuthorizationLevel.Function, "post")] HttpRequestData req)
         {
-            _logger.LogInformation("C# HTTP trigger function processed a request to add medication.");
+            _logger.LogInformation("AddMedication function processed a request.");
 
             string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
             var medication = JsonSerializer.Deserialize<MedicationModel>(requestBody, 
@@ -37,6 +38,7 @@ namespace PastIA.Function
             }
 
             var response = req.CreateResponse(HttpStatusCode.OK);
+            response.Headers.Add("Content-Type", "application/json; charset=utf-8");
             
             try
             {
@@ -49,29 +51,69 @@ namespace PastIA.Function
                     return errorResponse;
                 }
 
+                // Generar un ID si no se proporciona
+                Guid medicationId;
+                if (string.IsNullOrEmpty(medication.Id) || !Guid.TryParse(medication.Id, out medicationId))
+                {
+                    medicationId = Guid.NewGuid();
+                }
+
                 await using (SqlConnection connection = new SqlConnection(connectionString))
                 {
                     await connection.OpenAsync();
                     
-                    string query = @"INSERT INTO Medications (Id, Name, Dosage, Frequency, UserId) 
-                                   VALUES (@Id, @Name, @Dosage, @Frequency, @UserId);";
+                    string query = @"
+                        INSERT INTO dbo.Medications (
+                            MedicationId, UserId, Name, Dosage, TimeHour, TimeMinute, 
+                            DaysOfWeek, Instructions, IsActive, CreatedAt, 
+                            Importance, SideEffects, Category, TreatmentDuration, ReminderStrategy
+                        ) VALUES (
+                            @MedicationId, @UserId, @Name, @Dosage, @TimeHour, @TimeMinute, 
+                            @DaysOfWeek, @Instructions, 1, GETUTCDATE(),
+                            @Importance, @SideEffects, @Category, @TreatmentDuration, @ReminderStrategy
+                        );";
                     
                     await using (SqlCommand command = new SqlCommand(query, connection))
                     {
-                        // Generar un ID si no se proporciona
-                        string id = string.IsNullOrEmpty(medication.Id) ? Guid.NewGuid().ToString() : medication.Id;
-                        
-                        command.Parameters.AddWithValue("@Id", id);
+                        command.Parameters.AddWithValue("@MedicationId", medicationId);
+                        command.Parameters.AddWithValue("@UserId", medication.UserId);
                         command.Parameters.AddWithValue("@Name", medication.Name);
                         command.Parameters.AddWithValue("@Dosage", medication.Dosage);
-                        command.Parameters.AddWithValue("@Frequency", medication.Frequency);
-                        command.Parameters.AddWithValue("@UserId", medication.UserId);
+                        command.Parameters.AddWithValue("@TimeHour", medication.TimeHour);
+                        command.Parameters.AddWithValue("@TimeMinute", medication.TimeMinute);
+                        command.Parameters.AddWithValue("@DaysOfWeek", medication.DaysOfWeek);
                         
+                        if (string.IsNullOrEmpty(medication.Instructions))
+                            command.Parameters.AddWithValue("@Instructions", DBNull.Value);
+                        else
+                            command.Parameters.AddWithValue("@Instructions", medication.Instructions);
+                        
+                        command.Parameters.AddWithValue("@Importance", medication.Importance);
+                        
+                        if (string.IsNullOrEmpty(medication.SideEffects))
+                            command.Parameters.AddWithValue("@SideEffects", DBNull.Value);
+                        else
+                            command.Parameters.AddWithValue("@SideEffects", medication.SideEffects);
+                        
+                        if (string.IsNullOrEmpty(medication.Category))
+                            command.Parameters.AddWithValue("@Category", DBNull.Value);
+                        else
+                            command.Parameters.AddWithValue("@Category", medication.Category);
+                        
+                        if (medication.TreatmentDuration.HasValue)
+                            command.Parameters.AddWithValue("@TreatmentDuration", medication.TreatmentDuration.Value);
+                        else
+                            command.Parameters.AddWithValue("@TreatmentDuration", DBNull.Value);
+                        
+                        command.Parameters.AddWithValue("@ReminderStrategy", medication.ReminderStrategy);
+
                         await command.ExecuteNonQueryAsync();
                     }
                 }
                 
-                await response.WriteStringAsync("Medicamento agregado correctamente");
+                // Devolver el medicamento con su ID
+                medication.Id = medicationId.ToString();
+                await response.WriteAsJsonAsync(medication);
             }
             catch (Exception ex)
             {

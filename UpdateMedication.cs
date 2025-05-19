@@ -1,5 +1,6 @@
+// UpdateMedication.cs actualizado
 using System;
-using Microsoft.Data.SqlClient; // Cambiado de System.Data.SqlClient
+using Microsoft.Data.SqlClient;
 using System.IO;
 using System.Net;
 using System.Text.Json;
@@ -23,7 +24,7 @@ namespace PastIA.Function
         public async Task<HttpResponseData> Run(
             [HttpTrigger(AuthorizationLevel.Function, "put")] HttpRequestData req)
         {
-            _logger.LogInformation("C# HTTP trigger function processed a request to update medication.");
+            _logger.LogInformation("UpdateMedication function processed a request.");
 
             string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
             var medication = JsonSerializer.Deserialize<MedicationModel>(requestBody, 
@@ -53,19 +54,56 @@ namespace PastIA.Function
                 {
                     await connection.OpenAsync();
                     
-                    string query = @"UPDATE Medications 
-                                   SET Name = @Name, 
-                                       Dosage = @Dosage, 
-                                       Frequency = @Frequency
-                                   WHERE Id = @Id AND UserId = @UserId";
+                    string query = @"
+                        UPDATE dbo.Medications 
+                        SET Name = @Name, 
+                            Dosage = @Dosage, 
+                            TimeHour = @TimeHour,
+                            TimeMinute = @TimeMinute,
+                            DaysOfWeek = @DaysOfWeek,
+                            Instructions = @Instructions,
+                            Importance = @Importance,
+                            SideEffects = @SideEffects,
+                            Category = @Category,
+                            TreatmentDuration = @TreatmentDuration,
+                            ReminderStrategy = @ReminderStrategy,
+                            UpdatedAt = GETUTCDATE()
+                        WHERE MedicationId = @MedicationId 
+                        AND UserId = @UserId";
                     
                     await using (SqlCommand command = new SqlCommand(query, connection))
                     {
-                        command.Parameters.AddWithValue("@Id", medication.Id);
+                        command.Parameters.AddWithValue("@MedicationId", Guid.Parse(medication.Id));
                         command.Parameters.AddWithValue("@Name", medication.Name);
                         command.Parameters.AddWithValue("@Dosage", medication.Dosage);
-                        command.Parameters.AddWithValue("@Frequency", medication.Frequency);
+                        command.Parameters.AddWithValue("@TimeHour", medication.TimeHour);
+                        command.Parameters.AddWithValue("@TimeMinute", medication.TimeMinute);
+                        command.Parameters.AddWithValue("@DaysOfWeek", medication.DaysOfWeek);
                         command.Parameters.AddWithValue("@UserId", medication.UserId);
+                        
+                        if (string.IsNullOrEmpty(medication.Instructions))
+                            command.Parameters.AddWithValue("@Instructions", DBNull.Value);
+                        else
+                            command.Parameters.AddWithValue("@Instructions", medication.Instructions);
+                        
+                        command.Parameters.AddWithValue("@Importance", medication.Importance);
+                        
+                        if (string.IsNullOrEmpty(medication.SideEffects))
+                            command.Parameters.AddWithValue("@SideEffects", DBNull.Value);
+                        else
+                            command.Parameters.AddWithValue("@SideEffects", medication.SideEffects);
+                        
+                        if (string.IsNullOrEmpty(medication.Category))
+                            command.Parameters.AddWithValue("@Category", DBNull.Value);
+                        else
+                            command.Parameters.AddWithValue("@Category", medication.Category);
+                        
+                        if (medication.TreatmentDuration.HasValue)
+                            command.Parameters.AddWithValue("@TreatmentDuration", medication.TreatmentDuration.Value);
+                        else
+                            command.Parameters.AddWithValue("@TreatmentDuration", DBNull.Value);
+                        
+                        command.Parameters.AddWithValue("@ReminderStrategy", medication.ReminderStrategy);
                         
                         int rowsAffected = await command.ExecuteNonQueryAsync();
                         
@@ -78,7 +116,7 @@ namespace PastIA.Function
                     }
                 }
                 
-                await response.WriteStringAsync("Medicamento actualizado correctamente");
+                await response.WriteAsJsonAsync(new { success = true, message = "Medicamento actualizado correctamente" });
             }
             catch (Exception ex)
             {
