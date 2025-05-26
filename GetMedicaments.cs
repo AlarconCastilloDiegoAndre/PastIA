@@ -28,31 +28,41 @@ namespace PastIA.Function
 
             // Obtener el userId del querystring con operador de null-coalescing
             string userId = req.Query["userId"] ?? "user_demo_123";
+            _logger.LogInformation($"Getting medications for userId: {userId}");
 
             var response = req.CreateResponse(HttpStatusCode.OK);
             response.Headers.Add("Content-Type", "application/json; charset=utf-8");
 
             try
             {
-                // Obtener la cadena de conexión desde las variables de entorno
-                string? connectionString = Environment.GetEnvironmentVariable("SqlConnectionString");
-                
-                if (string.IsNullOrEmpty(connectionString))
-                {
-                    var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
-                    await errorResponse.WriteStringAsync("Error: No se encontró la cadena de conexión.");
-                    return errorResponse;
-                }
+                // Obtener la cadena de conexión usando el helper
+                string connectionString = ConnectionHelper.GetConnectionString();
+                _logger.LogInformation("Connection string obtenida exitosamente");
 
                 var medications = await GetMedicationsFromDatabase(connectionString, userId);
+                _logger.LogInformation($"Se obtuvieron {medications.Count} medicamentos");
                 
                 await response.WriteAsJsonAsync(medications);
             }
             catch (Exception ex)
             {
                 _logger.LogError($"Error al obtener medicamentos: {ex.Message}");
+                _logger.LogError($"Stack trace: {ex.StackTrace}");
+                
                 var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
-                await errorResponse.WriteStringAsync($"Error: {ex.Message}");
+                var errorData = new
+                {
+                    error = ex.Message,
+                    stackTrace = ex.StackTrace,
+                    suggestions = new[]
+                    {
+                        "Verificar que la tabla dbo.Medications exista en la base de datos",
+                        "Verificar los permisos del usuario de base de datos",
+                        "Revisar la configuración de las variables de entorno",
+                        "Verificar que el userId sea válido"
+                    }
+                };
+                await errorResponse.WriteAsJsonAsync(errorData);
                 return errorResponse;
             }
 
@@ -66,6 +76,7 @@ namespace PastIA.Function
             await using (SqlConnection connection = new SqlConnection(connectionString))
             {
                 await connection.OpenAsync();
+                _logger.LogInformation("Conexión a base de datos abierta exitosamente");
                 
                 // Consulta SQL adaptada a la nueva estructura
                 string query = @"

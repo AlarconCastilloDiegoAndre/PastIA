@@ -27,6 +27,8 @@ namespace PastIA.Function
             _logger.LogInformation("AddMedication function processed a request.");
 
             string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
+            _logger.LogInformation($"Request body: {requestBody}");
+            
             var medication = JsonSerializer.Deserialize<MedicationModel>(requestBody, 
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
@@ -42,14 +44,8 @@ namespace PastIA.Function
             
             try
             {
-                string? connectionString = Environment.GetEnvironmentVariable("SqlConnectionString");
-                
-                if (string.IsNullOrEmpty(connectionString))
-                {
-                    var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
-                    await errorResponse.WriteStringAsync("Error: No se encontró la cadena de conexión.");
-                    return errorResponse;
-                }
+                string connectionString = ConnectionHelper.GetConnectionString();
+                _logger.LogInformation("Connection string obtenida exitosamente");
 
                 // Generar un ID si no se proporciona
                 Guid medicationId;
@@ -61,6 +57,7 @@ namespace PastIA.Function
                 await using (SqlConnection connection = new SqlConnection(connectionString))
                 {
                     await connection.OpenAsync();
+                    _logger.LogInformation("Conexión a base de datos abierta exitosamente");
                     
                     string query = @"
                         INSERT INTO dbo.Medications (
@@ -108,6 +105,7 @@ namespace PastIA.Function
                         command.Parameters.AddWithValue("@ReminderStrategy", medication.ReminderStrategy);
 
                         await command.ExecuteNonQueryAsync();
+                        _logger.LogInformation($"Medicamento insertado exitosamente con ID: {medicationId}");
                     }
                 }
                 
@@ -118,8 +116,21 @@ namespace PastIA.Function
             catch (Exception ex)
             {
                 _logger.LogError($"Error al agregar medicamento: {ex.Message}");
+                _logger.LogError($"Stack trace: {ex.StackTrace}");
+                
                 var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
-                await errorResponse.WriteStringAsync($"Error: {ex.Message}");
+                var errorData = new
+                {
+                    error = ex.Message,
+                    stackTrace = ex.StackTrace,
+                    suggestions = new[]
+                    {
+                        "Verificar que la tabla dbo.Medications exista en la base de datos",
+                        "Verificar los permisos del usuario de base de datos",
+                        "Revisar la configuración de las variables de entorno"
+                    }
+                };
+                await errorResponse.WriteAsJsonAsync(errorData);
                 return errorResponse;
             }
             

@@ -27,6 +27,8 @@ namespace PastIA.Function
             _logger.LogInformation("RegisterUser function processed a request.");
 
             string requestBody = await new StreamReader(req.Body).ReadToEndAsync();
+            _logger.LogInformation($"Request body: {requestBody}");
+            
             var userData = JsonSerializer.Deserialize<UserModel>(requestBody, 
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
@@ -42,14 +44,9 @@ namespace PastIA.Function
             
             try
             {
-                string? connectionString = Environment.GetEnvironmentVariable("SqlConnectionString");
-                
-                if (string.IsNullOrEmpty(connectionString))
-                {
-                    var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
-                    await errorResponse.WriteStringAsync("Error: No se encontró la cadena de conexión.");
-                    return errorResponse;
-                }
+                // Obtener cadena de conexión
+                string connectionString = GetConnectionString();
+                _logger.LogInformation($"Connection string obtenida: {MaskConnectionString(connectionString)}");
                 
                 string userId;
                 
@@ -57,16 +54,19 @@ namespace PastIA.Function
                 if (!string.IsNullOrEmpty(userData.Id))
                 {
                     userId = userData.Id;
+                    _logger.LogInformation($"Usando ID proporcionado: {userId}");
                 }
                 else
                 {
                     // Obtenemos el último ID para generar uno nuevo en secuencia
                     userId = await GetNextUserIdAsync(connectionString);
+                    _logger.LogInformation($"ID generado: {userId}");
                 }
 
                 await using (SqlConnection connection = new SqlConnection(connectionString))
                 {
                     await connection.OpenAsync();
+                    _logger.LogInformation("Conexión a base de datos abierta exitosamente");
                     
                     // Primero verificar si el usuario ya existe
                     string checkQuery = "SELECT COUNT(*) FROM dbo.Users WHERE UserId = @UserId";
@@ -74,6 +74,8 @@ namespace PastIA.Function
                     {
                         checkCommand.Parameters.AddWithValue("@UserId", userId);
                         int userCount = (int)(await checkCommand.ExecuteScalarAsync() ?? 0);
+                        
+                        _logger.LogInformation($"Usuario existe: {userCount > 0}");
                         
                         // Si el usuario ya existe, actualizar información
                         if (userCount > 0)
@@ -97,6 +99,7 @@ namespace PastIA.Function
                                     updateCommand.Parameters.AddWithValue("@Email", userData.Email);
                                 
                                 await updateCommand.ExecuteNonQueryAsync();
+                                _logger.LogInformation("Usuario actualizado exitosamente");
                             }
                         }
                         // Si no existe, crear nuevo usuario
@@ -117,24 +120,70 @@ namespace PastIA.Function
                                     insertCommand.Parameters.AddWithValue("@Email", userData.Email);
                                 
                                 await insertCommand.ExecuteNonQueryAsync();
+                                _logger.LogInformation("Usuario creado exitosamente");
                             }
                         }
                     }
                 }
                 
                 // Devolver los datos del usuario con el ID
-                userData.Id = userId;
-                await response.WriteAsJsonAsync(userData);
+                var responseData = new
+                {
+                    id = userId,
+                    name = userData.Name ?? "Usuario",
+                    email = userData.Email
+                };
+                
+                await response.WriteAsJsonAsync(responseData);
+                _logger.LogInformation($"Respuesta enviada: {JsonSerializer.Serialize(responseData)}");
             }
             catch (Exception ex)
             {
                 _logger.LogError($"Error al registrar usuario: {ex.Message}");
+                _logger.LogError($"Stack trace: {ex.StackTrace}");
+                
                 var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
-                await errorResponse.WriteStringAsync($"Error: {ex.Message}");
+                var errorData = new
+                {
+                    error = ex.Message,
+                    stackTrace = ex.StackTrace,
+                    suggestions = new[]
+                    {
+                        "Verificar que la tabla dbo.Users exista en la base de datos",
+                        "Verificar los permisos del usuario de base de datos",
+                        "Revisar la configuración de las variables de entorno"
+                    }
+                };
+                await errorResponse.WriteAsJsonAsync(errorData);
                 return errorResponse;
             }
             
             return response;
+        }
+        
+        private string GetConnectionString()
+        {
+            // Método 1: Intentar usar SqlConnectionString directa
+            string? connectionString = Environment.GetEnvironmentVariable("SqlConnectionString");
+            
+            if (!string.IsNullOrEmpty(connectionString))
+            {
+                return connectionString;
+            }
+            
+            // Método 2: Construir desde variables separadas
+            var server = Environment.GetEnvironmentVariable("SERVER");
+            var database = Environment.GetEnvironmentVariable("DATABASE");
+            var userId = Environment.GetEnvironmentVariable("USER_ID");
+            var password = Environment.GetEnvironmentVariable("PASSWORD");
+            
+            if (string.IsNullOrEmpty(server) || string.IsNullOrEmpty(database) || 
+                string.IsNullOrEmpty(userId) || string.IsNullOrEmpty(password))
+            {
+                throw new Exception($"Faltan variables de entorno para la conexión a la base de datos. SERVER: {!string.IsNullOrEmpty(server)}, DATABASE: {!string.IsNullOrEmpty(database)}, USER_ID: {!string.IsNullOrEmpty(userId)}, PASSWORD: {!string.IsNullOrEmpty(password)}");
+            }
+            
+            return $"Server=tcp:{server},1433;Initial Catalog={database};Persist Security Info=False;User ID={userId};Password={password};MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;";
         }
         
         private async Task<string> GetNextUserIdAsync(string connectionString)
@@ -163,6 +212,22 @@ namespace PastIA.Function
                     return "USR001"; // Si hay algún error, empezamos desde USR001
                 }
             }
+        }
+        
+        private string MaskConnectionString(string connectionString)
+        {
+            if (string.IsNullOrEmpty(connectionString)) return "NULL";
+            
+            // Enmascarar la contraseña en la cadena de conexión
+            var parts = connectionString.Split(';');
+            for (int i = 0; i < parts.Length; i++)
+            {
+                if (parts[i].Trim().StartsWith("Password=", StringComparison.OrdinalIgnoreCase))
+                {
+                    parts[i] = "Password=***MASKED***";
+                }
+            }
+            return string.Join(";", parts);
         }
     }
 
